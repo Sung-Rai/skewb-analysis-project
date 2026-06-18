@@ -45,15 +45,14 @@ skewb_project/
 ├── scripts/
 │   └── performance_compare.sh
 ├── gui/
+|   ├── skewb_gui.py
 │   └── webgui.py
 └── docs/
-    ├── testing_notes.md
-    ├── performance_comparison.md
     ├── limitations.md
-    ├── state_space_notes.md
     ├── lookup_table_notes.md
-    ├── validity_checks.md
-    └── webgui_notes.md
+    ├── performance_comparison.md
+    ├── testing_notes.md
+    └── user_guide.md
 ```
 
 ## Generated files
