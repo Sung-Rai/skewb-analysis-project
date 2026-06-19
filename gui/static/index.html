@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="/app.js" defer></script>
+    <script src="/camera.js" defer></script>
+    <link rel="stylesheet" href="/style.css">
+    <title>Skewb Solver</title>
+</head>
+<body>
+<main>
+    <h1>Skewb Solver</h1>
+    <p class="subtitle">
+        Enter the visible colours of the Skewb on a 2D open cube net. The C solver searches the Skewb group and returns an optimal move sequence.
+    </p>
+
+    <div class="layout">
+        <section class="card net-wrap">
+            <div id="faces" class="cube-net"></div>
+        </section>
+
+        <aside class="card">
+            <h2>Colour palette</h2>
+            <div id="palette" class="palette"></div>
+
+            <section class="card scanner-card" aria-labelledby="cameraScanTitle">
+                <h2 id="cameraScanTitle">Camera Scan</h2>
+
+                <p id="scanStatus" class="help">Scan the face with the R centre.</p>
+
+                <div class="camera-wrap">
+                    <video id="camera" autoplay playsinline></video>
+                    <canvas id="overlay" width="400" height="400"></canvas>
+                    <canvas id="captureCanvas" width="400" height="400" hidden></canvas>
+                </div>
+
+                <div class="camera-actions">
+                    <button id="startCameraBtn" type="button">Start Camera</button>
+                    <button id="stopCameraBtn" type="button">Stop Camera</button>
+                    <button id="captureFaceBtn" type="button">Capture Face</button>
+                    <button id="resetScanBtn" type="button">Reset Scan</button>
+                </div>
+            </section>
+
+            <div class="actions">
+                <button class="primary" id="solveBtn" type="button">Solve</button>
+                <button id="exampleBtn" type="button">Load Example</button>
+                <button id="solvedBtn" type="button">Load Solved</button>
+                <button id="clearBtn" type="button">Clear</button>
+            </div>
+
+            <div id="output" class="output help">Choose a colour, click stickers, then press Solve.</div>
+
+            <p class="help">
+                Net layout: <code>U</code> above <code>F</code>, <code>D</code> below <code>F</code>, with <code>L F R B</code> across the middle.<br>
+                Each mini-face uses corner stickers plus a centre sticker.
+            </p>
+        </aside>
+    </div>
+</main>
+</body>
+</html>
