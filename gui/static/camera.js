@@ -70,8 +70,12 @@ const TRIM_RATIO = 0.15; /* how aggressively noisy pixels are ignored */
 const MIN_SAMPLE_BRIGHTNESS = 30; /* avoids sampling black borders */
 const TARGET_CORNERS_PER_COLOUR = 4; /* each colour must get exactly 4 corner stickers */
 
+const CAPTURE_FRAME_COUNT = 5;
+const CAPTURE_FRAME_DELAY_MS = 75;
+
 let currentScanFaceIndex = 0;
 let capturedFaces = createEmptyCapturedFaces();
+let isCapturingFace = false;
 
 function createEmptyCapturedFaces() {
     return Object.fromEntries(SCAN_FACE_ORDER.map(colour => [colour, null]));
@@ -134,11 +138,20 @@ function clearOverlay() {
     context.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-function captureFace() {
+async function captureFace() {
     const video = document.getElementById("camera");
+
+    if (isCapturingFace) {
+        return;
+    }
 
     if (!video.srcObject) {
         setOutput("Start the camera before capturing a face.", "error");
+        return;
+    }
+
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        setOutput("Camera is not ready yet. Try again in a moment.", "help");
         return;
     }
 
@@ -147,23 +160,131 @@ function captureFace() {
         return;
     }
 
-    const canvas = document.getElementById("captureCanvas");
-    const context = canvas.getContext("2d", {willReadFrequently: true});
-
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
     const centreColour = SCAN_FACE_ORDER[currentScanFaceIndex];
-    capturedFaces[centreColour] = sampleFaceColours(context);
-    currentScanFaceIndex++;
+    const captureButton = document.getElementById("captureFaceBtn");
 
-    if (currentScanFaceIndex < SCAN_FACE_ORDER.length) {
-        setScanStatus();
-        setOutput(`Captured ${centreColour} centre face.`, "help");
-        return;
+    isCapturingFace = true;
+
+    if (captureButton) {
+        captureButton.disabled = true;
     }
 
-    setScanStatus("Camera scan complete. Review the puzzle net before solving.");
-    applyCapturedFaces();
+    try {
+        setScanStatus(`Hold the ${centreColour} centre face still...`);
+        setOutput(`Capturing ${centreColour} centre face...`, "help");
+
+        const frameSamples = await captureFaceOverSeveralFrames(video);
+        capturedFaces[centreColour] = mergeFaceSamples(frameSamples);
+
+        currentScanFaceIndex++;
+
+        if (currentScanFaceIndex < SCAN_FACE_ORDER.length) {
+            setScanStatus();
+            setOutput(`Captured ${centreColour} centre face.`, "help");
+            return;
+        }
+
+        setScanStatus("Camera scan complete. Review the puzzle net before solving.");
+        applyCapturedFaces();
+    } catch (err) {
+        setScanStatus();
+        setOutput(`Could not capture face: ${err.message || err}`, "error");
+    } finally {
+        isCapturingFace = false;
+
+        if (captureButton) {
+            captureButton.disabled = false;
+        }
+    }
+}
+
+async function captureFaceOverSeveralFrames(video) {
+    const canvas = document.getElementById("captureCanvas");
+    const context = canvas.getContext("2d", {willReadFrequently: true});
+    const frameSamples = [];
+
+    for (let frameIndex = 0; frameIndex < CAPTURE_FRAME_COUNT; frameIndex++) {
+        if (!video.srcObject) {
+            throw new Error("Camera was stopped during capture.");
+        }
+
+        context.drawImage(
+            video,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+        frameSamples.push(sampleFaceColours(context));
+
+        if (frameIndex < CAPTURE_FRAME_COUNT - 1) {
+            await wait(CAPTURE_FRAME_DELAY_MS);
+        }
+    }
+
+    return frameSamples;
+}
+
+function mergeFaceSamples(frameSamples) {
+    if (frameSamples.length === 0) {
+        throw new Error("No camera frames were captured.");
+    }
+
+    return {
+        center: medianRgb(
+            frameSamples.map(sample => sample.center)
+        ),
+
+        corners: CORNER_ORDER.map(position => ({
+            position,
+            sample: medianRgb(
+                frameSamples.map(sample =>
+                    cornerSampleForPosition(sample, position)
+                )
+            ),
+        })),
+    };
+}
+
+function cornerSampleForPosition(faceSample, position) {
+    const corner = faceSample.corners.find(
+        item => item.position === position
+    );
+
+    if (!corner) {
+        throw new Error(`Missing ${position} corner sample.`);
+    }
+
+    return corner.sample;
+}
+
+function medianRgb(samples) {
+    return {
+        r: median(samples.map(sample => sample.r)),
+        g: median(samples.map(sample => sample.g)),
+        b: median(samples.map(sample => sample.b)),
+    };
+}
+
+function median(values) {
+    const sorted = values
+        .slice()
+        .sort((first, second) => first - second);
+
+    const middle = Math.floor(sorted.length / 2);
+
+    if (sorted.length % 2 === 1) {
+        return sorted[middle];
+    }
+
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function wait(milliseconds) {
+    return new Promise(resolve => {
+        window.setTimeout(resolve, milliseconds);
+    });
 }
 
 function resetScan() {

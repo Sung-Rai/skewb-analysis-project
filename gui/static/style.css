@@ -219,6 +219,12 @@ h1 {
     filter: brightness(1.08);
 }
 
+button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    filter: none;
+}
+
 .output {
     margin-top: 18px;
     padding: 14px;
