@@ -64,11 +64,19 @@ const CAPTURE_LABEL_BY_POSITION = {
     bottomLeft: "BL",
 };
 
-const LAB_LIGHTNESS_WEIGHT = 0.35; /* less sensitivity to shadows */
+const LAB_LIGHTNESS_WEIGHT = 0.20; /* less sensitivity to shadows */
 const LOW_CONFIDENCE_THRESHOLD = 8; /* which stickers get flagged */
 const TRIM_RATIO = 0.15; /* how aggressively noisy pixels are ignored */
 const MIN_SAMPLE_BRIGHTNESS = 30; /* avoids sampling black borders */
 const TARGET_CORNERS_PER_COLOUR = 4; /* each colour must get exactly 4 corner stickers */
+
+const RAW_LAB_WEIGHT = 0.60;
+const NORMALIZED_LAB_WEIGHT = 0.40;
+const CHROMA_WEIGHT = 0.20;
+
+const NORMALIZED_BRIGHTNESS_TOTAL = 420;
+const WHITE_BALANCE_MIN_CHANNEL = 20;
+const WHITE_BALANCE_MAX_SCALE = 2.2;
 
 const CAPTURE_FRAME_COUNT = 5;
 const CAPTURE_FRAME_DELAY_MS = 75;
@@ -620,35 +628,126 @@ function stickerIndexForPosition(position) {
     }
 }
 
-function nearestCentreColour(sample) {
-    let bestColour = null;
-    let bestDistance = Infinity;
+function colourDistance(first, second) {
+    const whiteBalanceScales = currentWhiteBalanceScales();
 
-    for (const centreColour of SCAN_FACE_ORDER) {
-        const centreSample = capturedFaces[centreColour].center;
-        const distance = colourDistance(sample, centreSample);
+    const firstBalanced = applyWhiteBalance(first, whiteBalanceScales);
+    const secondBalanced = applyWhiteBalance(second, whiteBalanceScales);
 
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            bestColour = centreColour;
-        }
-    }
+    const firstRawLab = rgbToLab(firstBalanced);
+    const secondRawLab = rgbToLab(secondBalanced);
 
-    return bestColour;
+    const firstNormalizedLab = rgbToLab(
+        normalizeBrightness(firstBalanced)
+    );
+    const secondNormalizedLab = rgbToLab(
+        normalizeBrightness(secondBalanced)
+    );
+
+    const rawDistance = weightedLabDistance(
+        firstRawLab,
+        secondRawLab
+    );
+
+    const normalizedDistance = weightedLabDistance(
+        firstNormalizedLab,
+        secondNormalizedLab
+    );
+
+    const chromaDistance = Math.abs(
+        labChroma(firstRawLab) - labChroma(secondRawLab)
+    );
+
+    return (
+        RAW_LAB_WEIGHT * rawDistance +
+        NORMALIZED_LAB_WEIGHT * normalizedDistance +
+        CHROMA_WEIGHT * chromaDistance
+    );
 }
 
-function colourDistance(first, second) {
-    const labA = rgbToLab(first);
-    const labB = rgbToLab(second);
-
-    const lightness = labA.l - labB.l;
-    const greenRed = labA.a - labB.a;
-    const blueYellow = labA.b - labB.b;
+function weightedLabDistance(firstLab, secondLab) {
+    const lightness = firstLab.l - secondLab.l;
+    const greenRed = firstLab.a - secondLab.a;
+    const blueYellow = firstLab.b - secondLab.b;
 
     return Math.sqrt(
         LAB_LIGHTNESS_WEIGHT * lightness * lightness +
         greenRed * greenRed +
         blueYellow * blueYellow
+    );
+}
+
+function labChroma(lab) {
+    return Math.sqrt(
+        lab.a * lab.a +
+        lab.b * lab.b
+    );
+}
+
+function currentWhiteBalanceScales() {
+    const whiteFace = capturedFaces.W;
+
+    if (!whiteFace || !whiteFace.center) {
+        return neutralWhiteBalanceScales();
+    }
+
+    return whiteBalanceScalesFromWhiteSample(whiteFace.center);
+}
+
+function neutralWhiteBalanceScales() {
+    return {
+        r: 1,
+        g: 1,
+        b: 1,
+    };
+}
+
+function whiteBalanceScalesFromWhiteSample(whiteSample) {
+    const red = Math.max(whiteSample.r, WHITE_BALANCE_MIN_CHANNEL);
+    const green = Math.max(whiteSample.g, WHITE_BALANCE_MIN_CHANNEL);
+    const blue = Math.max(whiteSample.b, WHITE_BALANCE_MIN_CHANNEL);
+
+    const grey = (red + green + blue) / 3;
+
+    return {
+        r: clamp(grey / red, 1 / WHITE_BALANCE_MAX_SCALE, WHITE_BALANCE_MAX_SCALE),
+        g: clamp(grey / green, 1 / WHITE_BALANCE_MAX_SCALE, WHITE_BALANCE_MAX_SCALE),
+        b: clamp(grey / blue, 1 / WHITE_BALANCE_MAX_SCALE, WHITE_BALANCE_MAX_SCALE),
+    };
+}
+
+function applyWhiteBalance(rgb, scales) {
+    return {
+        r: clampRgb(rgb.r * scales.r),
+        g: clampRgb(rgb.g * scales.g),
+        b: clampRgb(rgb.b * scales.b),
+    };
+}
+
+function normalizeBrightness(rgb) {
+    const total = rgb.r + rgb.g + rgb.b;
+
+    if (total <= 0) {
+        return rgb;
+    }
+
+    const scale = NORMALIZED_BRIGHTNESS_TOTAL / total;
+
+    return {
+        r: clampRgb(rgb.r * scale),
+        g: clampRgb(rgb.g * scale),
+        b: clampRgb(rgb.b * scale),
+    };
+}
+
+function clampRgb(value) {
+    return clamp(value, 0, 255);
+}
+
+function clamp(value, minimum, maximum) {
+    return Math.min(
+        maximum,
+        Math.max(minimum, value)
     );
 }
 
@@ -811,17 +910,22 @@ function assignCornerColours(cornerSamples) {
 }
 
 function confidenceForAssignment(distanceRow, assignedColour) {
-    const assignedDistance = distanceRow.find(
-        item => item.colour === assignedColour
-    ).distance;
+    const sorted = distanceRow
+        .slice()
+        .sort((first, second) => first.distance - second.distance);
 
-    const bestOtherDistance = Math.min(
-        ...distanceRow
-            .filter(item => item.colour !== assignedColour)
-            .map(item => item.distance)
+    const assigned = sorted.find(
+        item => item.colour === assignedColour
     );
 
-    return bestOtherDistance - assignedDistance;
+    const nearestOther = sorted.find(
+        item => item.colour !== assignedColour
+    );
+
+    return {
+        margin: nearestOther.distance - assigned.distance,
+        nearestOtherColour: nearestOther.colour,
+    };
 }
 
 function scanSummary(assignments) {
@@ -844,11 +948,13 @@ function scanSummary(assignments) {
     }
 
     const lowConfidence = assignments
-        .filter(assignment => assignment.confidence < LOW_CONFIDENCE_THRESHOLD)
+        .filter(assignment => assignment.confidence.margin < LOW_CONFIDENCE_THRESHOLD)
         .map(assignment => {
             const label = CAPTURE_LABEL_BY_POSITION[assignment.position];
-            const score = assignment.confidence.toFixed(1);
-            return `${assignment.faceCentreColour}-${label} (${score})`;
+            const score = assignment.confidence.margin.toFixed(1);
+            const other = assignment.confidence.nearestOtherColour;
+
+            return `${assignment.faceCentreColour}-${label}: ${assignment.assignedColour}/${other} (${score})`;
         });
 
     if (lowConfidence.length > 0) {
