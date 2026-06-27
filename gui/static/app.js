@@ -300,10 +300,16 @@ async function solve() {
         }
 
         const solutionText = data.solution ? data.solution : "Already solved";
-        setOutput(
-            `Solution: ${solutionText}\nMoves: ${data.length}`,
-            "ok"
-        );
+        const simpleInstructions = simpleInstructionText(faceStrings, data.solution);
+        const outputText = [
+            `Solution: ${solutionText}`,
+            `Moves: ${data.length}`,
+            "",
+            "Steps:",
+            simpleInstructions,
+        ].join("\n");
+
+        setOutput(outputText, "ok");
 
         if (window.stateGraph && data.graph) {
             window.stateGraph.load(data.graph, faceStrings);
@@ -315,6 +321,14 @@ async function solve() {
             window.stateGraph.clear("Graph unavailable.");
         }
     }
+}
+
+function simpleInstructionText(faceStrings, solutionText) {
+    if (!window.skewbInstructions) {
+        return "Simple steps unavailable.";
+    }
+
+    return window.skewbInstructions.describe(faceStrings, solutionText);
 }
 
 function bindAppEvents() {
