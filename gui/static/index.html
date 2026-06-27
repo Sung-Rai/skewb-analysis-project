@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="/app.js" defer></script>
+    <script src="/graph.js" defer></script>
     <script src="/camera.js" defer></script>
     <link rel="stylesheet" href="/style.css">
     <title>Skewb Solver</title>
@@ -12,7 +13,7 @@
 <main>
     <h1>Skewb Solver</h1>
     <p class="subtitle">
-        Enter the visible colours of the Skewb on a 2D open cube net. The C solver searches the Skewb group and returns an optimal move sequence.
+        Scan or enter your Skewb colours, then solve it.
     </p>
 
     <div class="layout">
@@ -21,13 +22,13 @@
         </section>
 
         <aside class="card">
-            <h2>Colour palette</h2>
+            <h2>Pick a colour</h2>
             <div id="palette" class="palette"></div>
 
             <section class="card scanner-card" aria-labelledby="cameraScanTitle">
-                <h2 id="cameraScanTitle">Camera Scan</h2>
+                <h2 id="cameraScanTitle">Camera scan</h2>
 
-                <p id="scanStatus" class="help">Scan the face with the R centre.</p>
+                <p id="scanStatus" class="help">Scan the R centre face.</p>
 
                 <div class="camera-wrap">
                     <video id="camera" autoplay playsinline></video>
@@ -36,28 +37,60 @@
                 </div>
 
                 <div class="camera-actions">
-                    <button id="startCameraBtn" type="button">Start Camera</button>
-                    <button id="stopCameraBtn" type="button">Stop Camera</button>
-                    <button id="captureFaceBtn" type="button">Capture Face</button>
-                    <button id="resetScanBtn" type="button">Reset Scan</button>
+                    <button id="startCameraBtn" type="button">Start</button>
+                    <button id="stopCameraBtn" type="button">Stop</button>
+                    <button id="captureFaceBtn" type="button">Capture</button>
+                    <button id="resetScanBtn" type="button">Reset scan</button>
                 </div>
             </section>
 
             <div class="actions">
                 <button class="primary" id="solveBtn" type="button">Solve</button>
-                <button id="exampleBtn" type="button">Load Example</button>
-                <button id="solvedBtn" type="button">Load Solved</button>
+                <button id="exampleBtn" type="button">Example</button>
+                <button id="solvedBtn" type="button">Solved</button>
                 <button id="clearBtn" type="button">Clear</button>
             </div>
 
-            <div id="output" class="output help">Choose a colour, click stickers, then press Solve.</div>
+            <div id="output" class="output help">Pick colours or scan the puzzle, then solve.</div>
 
             <p class="help">
-                Net layout: <code>U</code> above <code>F</code>, <code>D</code> below <code>F</code>, with <code>L F R B</code> across the middle.<br>
-                Each mini-face uses corner stickers plus a centre sticker.
+                Tip: click stickers to edit them. Drag faces to swap them. Use the arrows to rotate a face.
             </p>
         </aside>
     </div>
+
+    <section class="card graph-card" aria-labelledby="stateGraphTitle">
+        <div class="graph-header">
+            <div>
+                <h2 id="stateGraphTitle">Solve graph</h2>
+                <p id="graphStatus" class="help">Solve to show the graph.</p>
+            </div>
+
+            <div class="graph-toolbar">
+                <label class="graph-mode-control" for="graphModeSelect">
+                    View
+                    <select id="graphModeSelect">
+                        <option value="solution">Solution path</option>
+                        <option value="explored">Visited states</option>
+                        <option value="all">All states</option>
+                    </select>
+                </label>
+                <button id="graphResetBtn" type="button">Reset</button>
+                <button id="graphFitBtn" type="button">Fit</button>
+                <button id="graphPrevBtn" type="button">Back</button>
+                <button id="graphNextBtn" type="button">Next</button>
+            </div>
+        </div>
+
+        <div class="graph-canvas-wrap">
+            <canvas id="stateGraphPoints" width="900" height="560" aria-hidden="true"></canvas>
+            <canvas id="stateGraph" width="900" height="560" aria-label="Skewb solve graph"></canvas>
+        </div>
+
+        <p id="graphHelp" class="help">
+            Drag to move. Scroll to zoom. Click a node to explore other moves.
+        </p>
+    </section>
 </main>
 </body>
 </html>

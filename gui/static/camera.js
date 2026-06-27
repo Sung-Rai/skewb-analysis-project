@@ -95,7 +95,7 @@ async function startCamera() {
     stopCamera({silent: true});
 
     if (!navigator.mediaDevices?.getUserMedia) {
-        setOutput("This browser does not support camera access.", "error");
+        setOutput("Camera access is not available in this browser.", "error");
         return;
     }
 
@@ -109,7 +109,7 @@ async function startCamera() {
         drawOverlay();
         setScanStatus();
     } catch (err) {
-        setOutput(`Could not start camera: ${err.message || err}`, "error");
+        setOutput(`Could not start the camera: ${err.message || err}`, "error");
     }
 }
 
@@ -131,7 +131,7 @@ function stopCamera({silent = false} = {}) {
     clearOverlay();
 
     if (!silent) {
-        setOutput("Camera turned off.", "help");
+        setOutput("Camera off.", "help");
     }
 }
 
@@ -154,17 +154,17 @@ async function captureFace() {
     }
 
     if (!video.srcObject) {
-        setOutput("Start the camera before capturing a face.", "error");
+        setOutput("Start the camera first.", "error");
         return;
     }
 
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        setOutput("Camera is not ready yet. Try again in a moment.", "help");
+        setOutput("Camera is not ready yet.", "help");
         return;
     }
 
     if (currentScanFaceIndex >= SCAN_FACE_ORDER.length) {
-        setOutput("All six faces have already been captured. Reset the scan to start again.", "help");
+        setOutput("All faces scanned. Reset to scan again.", "help");
         return;
     }
 
@@ -178,8 +178,8 @@ async function captureFace() {
     }
 
     try {
-        setScanStatus(`Hold the ${centreColour} centre face still...`);
-        setOutput(`Capturing ${centreColour} centre face...`, "help");
+        setScanStatus(`Hold the ${centreColour} centre face still…`);
+        setOutput(`Capturing ${centreColour} face…`, "help");
 
         const frameSamples = await captureFaceOverSeveralFrames(video);
         capturedFaces[centreColour] = mergeFaceSamples(frameSamples);
@@ -188,15 +188,15 @@ async function captureFace() {
 
         if (currentScanFaceIndex < SCAN_FACE_ORDER.length) {
             setScanStatus();
-            setOutput(`Captured ${centreColour} centre face.`, "help");
+            setOutput(`Captured ${centreColour} face.`, "help");
             return;
         }
 
-        setScanStatus("Camera scan complete. Review the puzzle net before solving.");
+        setScanStatus("Scan complete. Check the net before solving.");
         applyCapturedFaces();
     } catch (err) {
         setScanStatus();
-        setOutput(`Could not capture face: ${err.message || err}`, "error");
+        setOutput(`Could not capture the face: ${err.message || err}`, "error");
     } finally {
         isCapturingFace = false;
 
@@ -299,7 +299,7 @@ function resetScan() {
     currentScanFaceIndex = 0;
     capturedFaces = createEmptyCapturedFaces();
     setScanStatus();
-    setOutput("Camera scan reset.", "help");
+    setOutput("Scan reset.", "help");
 }
 
 function setScanStatus(message = null) {
@@ -311,7 +311,7 @@ function setScanStatus(message = null) {
     }
 
     const colour = SCAN_FACE_ORDER[currentScanFaceIndex];
-    scanStatus.textContent = `Scan the face with the ${colour} centre.`;
+    scanStatus.textContent = `Scan the ${colour} centre face.`;
 }
 
 function sampleFaceColours(context) {
@@ -609,7 +609,7 @@ function applyCapturedFaces() {
         setState(nextState.map(face => face.join("")));
         setOutput(scanSummary(assignments), "ok");
     } catch (err) {
-        setOutput(`Could not process camera scan: ${err.message || err}`, "error");
+        setOutput(`Could not read the scan: ${err.message || err}`, "error");
     }
 }
 
@@ -930,37 +930,21 @@ function confidenceForAssignment(distanceRow, assignedColour) {
 
 function scanSummary(assignments) {
     const lines = [
-        "Camera scan complete.",
-        "Detected colours have been applied to the puzzle net.",
-        "Check the stickers before pressing Solve.",
-        "",
+        "Scan complete.",
+        "Detected colours were added to the net.",
+        "Check the net before solving.",
     ];
-
-    for (const centreColour of SCAN_FACE_ORDER) {
-        const faceAssignments = assignments
-            .filter(assignment => assignment.faceCentreColour === centreColour)
-            .map(assignment => {
-                const label = CAPTURE_LABEL_BY_POSITION[assignment.position];
-                return `${label}:${assignment.assignedColour}`;
-            });
-
-        lines.push(`${centreColour} centre face: ${faceAssignments.join(" ")}`);
-    }
 
     const lowConfidence = assignments
         .filter(assignment => assignment.confidence.margin < LOW_CONFIDENCE_THRESHOLD)
         .map(assignment => {
             const label = CAPTURE_LABEL_BY_POSITION[assignment.position];
-            const score = assignment.confidence.margin.toFixed(1);
-            const other = assignment.confidence.nearestOtherColour;
-
-            return `${assignment.faceCentreColour}-${label}: ${assignment.assignedColour}/${other} (${score})`;
+            return `${assignment.faceCentreColour}-${label}`;
         });
 
     if (lowConfidence.length > 0) {
         lines.push("");
-        lines.push("Low confidence stickers:");
-        lines.push(lowConfidence.join(", "));
+        lines.push(`Please check: ${lowConfidence.join(", ")}`);
     }
 
     return lines.join("\n");

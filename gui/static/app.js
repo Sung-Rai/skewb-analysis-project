@@ -244,7 +244,7 @@ function setState(faceStrings) {
 function clearState() {
     state = Array.from({length: 6}, () => Array(5).fill(""));
     renderFaces();
-    setOutput("Choose a colour, click stickers, then press Solve.", "help");
+    setOutput("Pick colours or scan the puzzle, then solve.", "help");
 }
 
 function getFaceStrings() {
@@ -280,7 +280,11 @@ async function solve() {
         return;
     }
 
-    setOutput("Solving...", "help");
+    setOutput("Solving…", "help");
+
+    if (window.stateGraph) {
+        window.stateGraph.clear("Building graph…");
+    }
 
     try {
         const response = await fetch("/solve", {
@@ -292,16 +296,29 @@ async function solve() {
 
         if (!response.ok || !data.ok) {
             setOutput(data.error || "Solver failed.", "error");
+
+            if (window.stateGraph) {
+                window.stateGraph.clear("Graph unavailable.");
+            }
+
             return;
         }
 
         const solutionText = data.solution ? data.solution : "Already solved";
         setOutput(
-            `Solution: ${solutionText}\nLength: ${data.length}\nMode: ${data.mode}\n${data.stateLabel}: ${data.states}\nVerified: ${data.verified}`,
+            `Solution: ${solutionText}\nMoves: ${data.length}`,
             "ok"
         );
+
+        if (window.stateGraph && data.graph) {
+            window.stateGraph.load(data.graph, faceStrings);
+        }
     } catch (err) {
-        setOutput(`Could not contact web server: ${err}`, "error");
+        setOutput("Could not contact the solver.", "error");
+
+        if (window.stateGraph) {
+            window.stateGraph.clear("Graph unavailable.");
+        }
     }
 }
 
@@ -315,7 +332,7 @@ function bindAppEvents() {
 
     document.getElementById("solvedBtn").addEventListener("click", () => {
         setState(solved);
-        setOutput("Solved state loaded. Press Solve to test.", "help");
+        setOutput("Solved state loaded.", "help");
     });
 
     document.getElementById("clearBtn").addEventListener("click", clearState);
