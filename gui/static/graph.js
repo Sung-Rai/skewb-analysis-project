@@ -539,18 +539,36 @@ function withGraphTransform(context, callback) {
 
 function layoutPathNodes(path) {
     return path.map((node, index) => {
-        const radius = node.depth * GRAPH.ringSpacing;
-        const curve = (index - (path.length - 1) / 2) * 0.055;
-        const angle = GRAPH.pathAngle + curve;
+        const position = hasExactLookupPosition(node)
+            ? exactLookupNodePosition(node)
+            : fallbackPathNodePosition(node, index, path.length);
 
         return {
             ...node,
             pathIndex: index,
             generation: 0,
-            x: radius * Math.cos(angle),
-            y: radius * Math.sin(angle),
+            x: position.x,
+            y: position.y,
         };
     });
+}
+
+function hasExactLookupPosition(node) {
+    return Number.isFinite(node?.depth)
+        && Number.isFinite(node?.rankInDepth)
+        && Number.isFinite(node?.depthCount)
+        && node.depthCount > 0;
+}
+
+function fallbackPathNodePosition(node, index, pathLength) {
+    const radius = node.depth * GRAPH.ringSpacing;
+    const curve = (index - (pathLength - 1) / 2) * 0.055;
+    const angle = GRAPH.pathAngle + curve;
+
+    return {
+        x: radius * Math.cos(angle),
+        y: radius * Math.sin(angle),
+    };
 }
 
 function focusedGraphNode() {
@@ -666,7 +684,9 @@ function applyExactMetadataToNode(node, metadata) {
         return;
     }
 
-    if (Number.isFinite(metadata.depth)) {
+    const isSolutionPathNode = Number.isInteger(node.pathIndex);
+
+    if (Number.isFinite(metadata.depth) && !isSolutionPathNode) {
         node.depth = metadata.depth;
     }
 
@@ -680,6 +700,10 @@ function applyExactMetadataToNode(node, metadata) {
 
     if (Number.isFinite(metadata.depthCount)) {
         node.depthCount = metadata.depthCount;
+    }
+
+    if (isSolutionPathNode) {
+        return;
     }
 
     const position = exactLookupNodePosition(node);

@@ -86,13 +86,8 @@ function renderFaces() {
     faces.forEach((face, faceIndex) => {
         const wrapper = createFaceElement(face);
         const grid = createStickerGrid(face, faceIndex);
-        const hint = document.createElement("div");
-
-        hint.className = "face-hint";
-        hint.textContent = "TL TR BR BL C";
 
         wrapper.appendChild(grid);
-        wrapper.appendChild(hint);
         container.appendChild(wrapper);
     });
 }

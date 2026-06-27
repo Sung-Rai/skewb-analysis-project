@@ -213,11 +213,16 @@ def full_state_space_rings() -> List[Dict[str, int]]:
 
 
 def lookup_explored_rings(solution_length: int) -> List[Dict[str, int]]:
-    # A lookup solve follows one stored state per solution step. The lookup
-    # table itself is shown by the "Every node" mode.
+    max_depth = max(solution_length, 0)
+    rings = lookup_depth_histogram()
+
+    if not rings:
+        return [{"depth": 0, "count": 1}]
+
     return [
-        {"depth": depth, "count": 1}
-        for depth in range(0, max(solution_length, 0) + 1)
+        {"depth": ring["depth"], "count": ring["count"]}
+        for ring in rings
+        if int(ring["depth"]) <= max_depth
     ]
 
 
@@ -243,12 +248,24 @@ def bfs_visual_rings(solution_length: int, states_explored: object) -> List[Dict
     return rings
 
 
-def solution_path_nodes(solution_moves: List[str]) -> List[Dict[str, object]]:
+def states_along_solution(faces: List[str], solution_moves: List[str]) -> List[str]:
+    state_id = "".join(faces)
+    states = [state_id]
+
+    for move in solution_moves:
+        state_id = apply_graph_move_to_state_id(state_id, move)
+        states.append(state_id)
+
+    return states
+
+
+def solution_path_nodes(solution_moves: List[str], faces: List[str]) -> List[Dict[str, object]]:
     length = len(solution_moves)
+    states = states_along_solution(faces, solution_moves) if faces else []
     nodes: List[Dict[str, object]] = []
 
     for index in range(length + 1):
-        depth = length - index
+        fallback_depth = length - index
         if index == 0:
             label = "Current state"
         elif index == length:
@@ -256,11 +273,22 @@ def solution_path_nodes(solution_moves: List[str]) -> List[Dict[str, object]]:
         else:
             label = f"After move {index}"
 
+        state_id = states[index] if index < len(states) else None
+        metadata = LOOKUP_GRAPH_INDEX.metadata_for_state_id(state_id) if state_id else None
+
         node: Dict[str, object] = {
             "id": f"path-{index}",
-            "depth": depth,
+            "depth": metadata["depth"] if metadata else fallback_depth,
             "label": label,
         }
+
+        if state_id:
+            node["stateId"] = state_id
+
+        if metadata:
+            node["index"] = metadata["index"]
+            node["rankInDepth"] = metadata["rankInDepth"]
+            node["depthCount"] = LOOKUP_GRAPH_INDEX.depth_counts.get(metadata["depth"], 0)
 
         if index < length:
             node["moveToNext"] = solution_moves[index]
@@ -270,7 +298,7 @@ def solution_path_nodes(solution_moves: List[str]) -> List[Dict[str, object]]:
     return nodes
 
 
-def build_graph_payload(parsed: Dict[str, object], use_lookup: bool) -> Dict[str, object]:
+def build_graph_payload(parsed: Dict[str, object], use_lookup: bool, faces: List[str]) -> Dict[str, object]:
     solution_moves = parse_solution_moves(parsed.get("solution"))
     solution_length = int(parsed.get("length") or len(solution_moves))
 
@@ -322,7 +350,7 @@ def build_graph_payload(parsed: Dict[str, object], use_lookup: bool) -> Dict[str
         "rings": explored_rings,
         "exploredRings": explored_rings,
         "allRings": all_rings,
-        "path": solution_path_nodes(solution_moves),
+        "path": solution_path_nodes(solution_moves, faces),
         "moves": solution_moves,
         "solutionLength": solution_length,
         "states": parsed.get("states"),
@@ -497,7 +525,7 @@ class SkewbHandler(BaseHTTPRequestHandler):
 
         parsed["mode"] = solver_mode
         parsed["stateLabel"] = state_label
-        parsed["graph"] = build_graph_payload(parsed, use_lookup)
+        parsed["graph"] = build_graph_payload(parsed, use_lookup, faces)
         self.send_json(parsed)
 
     def send_json(self, data: Dict[str, object], status: int = 200) -> None:
