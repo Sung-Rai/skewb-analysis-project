@@ -1,4 +1,4 @@
-const SCAN_FACE_ORDER = ["R", "B", "G", "O", "W", "Y"];
+const SCAN_FACE_ORDER = ["W", "R", "G", "Y", "O", "B"];
 
 const FACE_INDEX_BY_CENTRE_COLOUR = {
     W: 0,
