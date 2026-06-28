@@ -1,5 +1,8 @@
 const GRAPH = {
     ringSpacing: 86,
+    stackedLayerGap: 68,
+    stackedYScale: 0.32,
+    stackedMinRadius: 36,
     pathAngle: -Math.PI / 2,
     minScale: 0.18,
     maxScale: 5,
@@ -8,12 +11,20 @@ const GRAPH = {
     solvedDotSize: 6,
     pathNodeSize: 7,
     currentNodeSize: 10,
+    adjacentNodeSize: 6.5,
+    adjacentRingSpread: Math.PI * 0.9,
+    explorationFadeAlpha: 0.28,
 };
 
 const GRAPH_MODE = {
     SOLUTION: "solution",
     EXPLORED: "explored",
     ALL: "all",
+};
+
+const GRAPH_LAYOUT = {
+    FLAT: "flat",
+    STACKED: "stacked",
 };
 
 const GRAPH_RENDERER = {
@@ -45,6 +56,7 @@ const graphState = {
     pathNodes: [],
     adjacentEdges: [],
     activeNode: null,
+    moveExplorationActive: false,
     pathNodesByState: new Map(),
     explorationNodesByState: new Map(),
     exactNeighbourCache: new Map(),
@@ -52,6 +64,7 @@ const graphState = {
     nodeDatasets: new Map(),
     progressIndex: 0,
     displayMode: GRAPH_MODE.SOLUTION,
+    layoutMode: GRAPH_LAYOUT.STACKED,
     scale: 1,
     offsetX: 0,
     offsetY: 0,
@@ -200,12 +213,14 @@ function loadStateGraph(data, initialFaceStrings = null) {
     graphState.data = normaliseGraphData(data, initialFaceStrings);
     graphState.progressIndex = 0;
     graphState.displayMode = currentGraphMode();
+    graphState.layoutMode = currentGraphLayout();
     graphState.pathNodes = layoutPathNodes(graphState.data.path || []);
     graphState.pathNodesByState = mapPathNodesByState(graphState.pathNodes);
     graphState.explorationNodesByState = new Map();
     graphState.exactNeighbourCache = new Map();
     graphState.exactNeighbourRequests = new Set();
     graphState.activeNode = null;
+    graphState.moveExplorationActive = false;
     graphState.adjacentEdges = layoutFocusedAdjacentEdges();
     graphState.nodeDatasets = new Map();
 
@@ -278,6 +293,7 @@ function clearStateGraph(message = "Solve to show the graph.") {
     graphState.pathNodes = [];
     graphState.adjacentEdges = [];
     graphState.activeNode = null;
+    graphState.moveExplorationActive = false;
     graphState.pathNodesByState = new Map();
     graphState.explorationNodesByState = new Map();
     graphState.nodeDatasets = new Map();
@@ -357,6 +373,13 @@ function bindGraphEvents() {
             setGraphDisplayMode(event.target.value);
         });
     }
+
+    const layoutSelect = document.getElementById("graphLayoutSelect");
+    if (layoutSelect) {
+        layoutSelect.addEventListener("change", event => {
+            setGraphLayoutMode(event.target.value);
+        });
+    }
 }
 
 function updateHoveredRing(event) {
@@ -368,11 +391,32 @@ function updateHoveredRing(event) {
     const x = event.offsetX * size.pixelRatio;
     const y = event.offsetY * size.pixelRatio;
     const world = screenToWorld(x, y);
-    const radius = Math.sqrt(world.x * world.x + world.y * world.y);
-    const depth = Math.round(radius / GRAPH.ringSpacing);
-    const ring = activeRings().find(item => item.depth === depth);
-    const distance = Math.abs(radius - depth * GRAPH.ringSpacing);
-    const nextHover = ring && distance < 18 / graphState.scale ? depth : null;
+    const rings = activeRings();
+    let nextHover = null;
+
+    if (graphState.layoutMode === GRAPH_LAYOUT.STACKED) {
+        let bestDistance = Infinity;
+
+        for (const ring of rings) {
+            const layerY = stackedLayerY(ring.depth);
+            const distance = Math.abs(world.y - layerY);
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                nextHover = ring.depth;
+            }
+        }
+
+        if (bestDistance > 20 / graphState.scale) {
+            nextHover = null;
+        }
+    } else {
+        const radius = Math.sqrt(world.x * world.x + world.y * world.y);
+        const depth = Math.round(radius / GRAPH.ringSpacing);
+        const ring = rings.find(item => item.depth === depth);
+        const distance = Math.abs(radius - depth * GRAPH.ringSpacing);
+        nextHover = ring && distance < 18 / graphState.scale ? depth : null;
+    }
 
     if (graphState.hoveredRingDepth !== nextHover) {
         graphState.hoveredRingDepth = nextHover;
@@ -401,6 +445,31 @@ function setGraphDisplayMode(mode) {
         updateGraphStatus();
         requestGraphRedraw();
     }
+}
+
+function currentGraphLayout() {
+    const select = document.getElementById("graphLayoutSelect");
+    return select ? select.value : GRAPH_LAYOUT.STACKED;
+}
+
+function setGraphLayoutMode(layout) {
+    graphState.layoutMode = layout;
+    graphState.nodeDatasets = new Map();
+    relayoutInteractiveGraphNodes();
+
+    if (graphState.data) {
+        fitGraphToCurrentMode();
+        updateGraphStatus();
+        requestGraphRedraw();
+    }
+}
+
+function relayoutInteractiveGraphNodes() {
+    graphState.pathNodes = layoutPathNodes(graphState.data?.path || []);
+    graphState.pathNodesByState = mapPathNodesByState(graphState.pathNodes);
+
+    graphState.explorationNodesByState = new Map();
+    graphState.adjacentEdges = layoutFocusedAdjacentEdges();
 }
 
 function activeRings() {
@@ -469,12 +538,32 @@ function resetGraphView() {
 
     graphState.scale = 1;
     graphState.offsetX = size.width / 2;
-    graphState.offsetY = size.height / 2;
+    graphState.offsetY = graphState.layoutMode === GRAPH_LAYOUT.STACKED
+        ? size.height * 0.76
+        : size.height / 2;
     requestGraphRedraw();
 }
 
 function fitGraphToCurrentMode() {
     const size = resizeGraphCanvases();
+    const extents = graphWorldExtents();
+    const usableX = size.width * 0.45;
+    const usableY = size.height * 0.43;
+
+    graphState.scale = clamp(
+        Math.min(usableX / extents.width, usableY / extents.height),
+        GRAPH.minScale,
+        GRAPH.maxScale
+    );
+
+    graphState.offsetX = size.width / 2;
+    graphState.offsetY = graphState.layoutMode === GRAPH_LAYOUT.STACKED
+        ? size.height * 0.76
+        : size.height / 2;
+    requestGraphRedraw();
+}
+
+function graphWorldExtents() {
     const maxDepth = Math.max(
         1,
         ...activeRings().map(ring => ring.depth),
@@ -482,13 +571,20 @@ function fitGraphToCurrentMode() {
         ...graphState.adjacentEdges.map(edge => edge.target.depth),
         focusedGraphNode()?.depth || 0
     );
-    const radius = maxDepth * GRAPH.ringSpacing + 80;
-    const usable = Math.min(size.width, size.height) * 0.44;
 
-    graphState.scale = clamp(usable / radius, GRAPH.minScale, GRAPH.maxScale);
-    graphState.offsetX = size.width / 2;
-    graphState.offsetY = size.height / 2;
-    requestGraphRedraw();
+    if (graphState.layoutMode === GRAPH_LAYOUT.STACKED) {
+        const maxRadius = maxDepth * GRAPH.ringSpacing + 80;
+        return {
+            width: maxRadius,
+            height: maxDepth * GRAPH.stackedLayerGap + maxRadius * GRAPH.stackedYScale + 90,
+        };
+    }
+
+    const radius = maxDepth * GRAPH.ringSpacing + 80;
+    return {
+        width: radius,
+        height: radius,
+    };
 }
 
 function zoomGraphAt(screenX, screenY, factor) {
@@ -561,14 +657,81 @@ function hasExactLookupPosition(node) {
 }
 
 function fallbackPathNodePosition(node, index, pathLength) {
-    const radius = node.depth * GRAPH.ringSpacing;
-    const curve = (index - (pathLength - 1) / 2) * 0.055;
-    const angle = GRAPH.pathAngle + curve;
+    const count = Math.max(1, pathLength);
+    const rank = Math.max(0, index);
+    return graphPositionForDepthRank(node.depth, rank, count);
+}
 
+function graphPositionForDepthRank(depth, rank, count) {
+    const safeDepth = Math.max(0, depth || 0);
+
+    if (safeDepth <= 0) {
+        return {x: 0, y: 0};
+    }
+
+    const safeCount = Math.max(1, count || 1);
+    const angle = (2 * Math.PI * (rank + 0.5)) / safeCount;
+
+    if (graphState.layoutMode === GRAPH_LAYOUT.STACKED) {
+        return stackedGraphPosition(safeDepth, angle);
+    }
+
+    const radius = safeDepth * GRAPH.ringSpacing;
     return {
         x: radius * Math.cos(angle),
         y: radius * Math.sin(angle),
     };
+}
+
+function applyExactMetadataToNode(node, metadata, {updatePosition = true} = {}) {
+    if (!node || !metadata) {
+        return;
+    }
+
+    if (Number.isFinite(metadata.depth)) {
+        node.depth = metadata.depth;
+    }
+
+    if (Number.isFinite(metadata.index)) {
+        node.lookupIndex = metadata.index;
+    }
+
+    if (Number.isFinite(metadata.rankInDepth)) {
+        node.rankInDepth = metadata.rankInDepth;
+    }
+
+    if (Number.isFinite(metadata.depthCount)) {
+        node.depthCount = metadata.depthCount;
+    }
+
+    if (updatePosition && !node.positionLocked && hasExactLookupPosition(node)) {
+        const position = exactLookupNodePosition(node);
+        node.x = position.x;
+        node.y = position.y;
+    }
+}
+
+function exactLookupNodePosition(node) {
+    const depth = Number.isFinite(node?.depth) ? node.depth : 0;
+    const rank = Number.isFinite(node?.rankInDepth) ? node.rankInDepth : 0;
+    const count = Number.isFinite(node?.depthCount) && node.depthCount > 0
+        ? node.depthCount
+        : 1;
+
+    return graphPositionForDepthRank(depth, rank, count);
+}
+
+function stackedGraphPosition(depth, angle) {
+    const radius = Math.max(GRAPH.stackedMinRadius, depth * GRAPH.ringSpacing);
+
+    return {
+        x: radius * Math.cos(angle),
+        y: radius * Math.sin(angle) * GRAPH.stackedYScale + stackedLayerY(depth),
+    };
+}
+
+function stackedLayerY(depth) {
+    return -depth * GRAPH.stackedLayerGap;
 }
 
 function focusedGraphNode() {
@@ -616,131 +779,6 @@ function exactNeighbourDataForNode(source) {
     return graphState.exactNeighbourCache.get(source.stateId) || null;
 }
 
-function layoutExactAdjacentEdgesForNode(source, neighbourData) {
-    if (!neighbourData || !Array.isArray(neighbourData.neighbours)) {
-        return [];
-    }
-
-    if (neighbourData.state) {
-        applyExactMetadataToNode(source, neighbourData.state);
-    }
-
-    return neighbourData.neighbours.map(neighbour => {
-        const pathNode = graphState.pathNodesByState.get(neighbour.stateId);
-
-        if (pathNode) {
-            return {
-                source,
-                move: neighbour.move,
-                kind: "path",
-                target: pathNode,
-            };
-        }
-
-        const existingNode = graphState.explorationNodesByState.get(neighbour.stateId);
-        if (existingNode) {
-            applyExactMetadataToNode(existingNode, neighbour);
-            return {
-                source,
-                move: neighbour.move,
-                kind: "branch",
-                target: existingNode,
-            };
-        }
-
-        const target = createLookupAdjacentNode(source, neighbour);
-        graphState.explorationNodesByState.set(neighbour.stateId, target);
-
-        return {
-            source,
-            move: neighbour.move,
-            kind: "branch",
-            target,
-        };
-    });
-}
-
-function createLookupAdjacentNode(source, neighbour) {
-    const position = exactLookupNodePosition(neighbour);
-
-    return {
-        id: `lookup-${neighbour.index ?? hashString(neighbour.stateId || `${source.id}:${neighbour.move}`)}`,
-        stateId: neighbour.stateId,
-        lookupIndex: neighbour.index,
-        rankInDepth: neighbour.rankInDepth,
-        depthCount: neighbour.depthCount,
-        depth: Number.isFinite(neighbour.depth) ? neighbour.depth : outwardAdjacentDepth(source, graphMaximumDepth()),
-        label: `${neighbour.move} from ${source.label || source.id}`,
-        x: position.x,
-        y: position.y,
-        parent: source,
-        entryMove: neighbour.move,
-        generation: (source.generation || 0) + 1,
-    };
-}
-
-function applyExactMetadataToNode(node, metadata) {
-    if (!node || !metadata) {
-        return;
-    }
-
-    const isSolutionPathNode = Number.isInteger(node.pathIndex);
-
-    if (Number.isFinite(metadata.depth) && !isSolutionPathNode) {
-        node.depth = metadata.depth;
-    }
-
-    if (Number.isFinite(metadata.index)) {
-        node.lookupIndex = metadata.index;
-    }
-
-    if (Number.isFinite(metadata.rankInDepth)) {
-        node.rankInDepth = metadata.rankInDepth;
-    }
-
-    if (Number.isFinite(metadata.depthCount)) {
-        node.depthCount = metadata.depthCount;
-    }
-
-    if (isSolutionPathNode) {
-        return;
-    }
-
-    const position = exactLookupNodePosition(node);
-    node.x = position.x;
-    node.y = position.y;
-}
-
-function exactLookupNodePosition(metadata) {
-    const depth = Number.isFinite(metadata.depth) ? metadata.depth : 0;
-
-    if (depth <= 0) {
-        return {x: 0, y: 0};
-    }
-
-    const count = Number.isFinite(metadata.depthCount) && metadata.depthCount > 0
-        ? metadata.depthCount
-        : ringCountForDepth(depth);
-    const rank = Number.isFinite(metadata.rankInDepth)
-        ? metadata.rankInDepth
-        : hashString(metadata.stateId || `${depth}`) % Math.max(1, count);
-
-    const angle = (2 * Math.PI * (rank + 0.5)) / Math.max(1, count);
-    const radius = depth * GRAPH.ringSpacing;
-
-    return {
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
-    };
-}
-
-function ringCountForDepth(depth) {
-    const ring = (graphState.data?.allRings || []).find(item => item.depth === depth)
-        || (graphState.data?.exploredRings || []).find(item => item.depth === depth);
-
-    return Math.max(1, ring?.count || 1);
-}
-
 async function requestExactNeighboursForNode(source) {
     if (!source?.stateId || !graphState.data?.lookupGraphAvailable || !graphState.data?.neighbourEndpoint) {
         return;
@@ -765,7 +803,7 @@ async function requestExactNeighboursForNode(source) {
         }
 
         graphState.exactNeighbourCache.set(source.stateId, payload);
-        applyExactMetadataToNode(source, payload.state);
+        applyExactMetadataToNode(source, payload.state, {updatePosition: false});
 
         const focused = focusedGraphNode();
         if (focused?.stateId === source.stateId) {
@@ -780,147 +818,165 @@ async function requestExactNeighboursForNode(source) {
     }
 }
 
-function createAdjacentMoveEdge(source, move, branchIndex, branchCount) {
-    const targetStateId = source.stateId
-        ? applyGraphMoveToState(source.stateId, move)
-        : null;
-
-    const pathNode = targetStateId
-        ? graphState.pathNodesByState.get(targetStateId)
-        : null;
-
-    if (pathNode && isPlausibleAdjacentDepth(source.depth, pathNode.depth)) {
-        return {
-            source,
-            move,
-            kind: "path",
-            target: pathNode,
-        };
+function layoutExactAdjacentEdgesForNode(source, neighbourData) {
+    if (!neighbourData || !Array.isArray(neighbourData.neighbours)) {
+        return [];
     }
 
-    const existingNode = targetStateId
-        ? graphState.explorationNodesByState.get(targetStateId)
-        : null;
+    if (neighbourData.state) {
+        applyExactMetadataToNode(source, neighbourData.state, {updatePosition: false});
+    }
 
-    if (existingNode && isPlausibleAdjacentDepth(source.depth, existingNode.depth)) {
+    const edges = neighbourData.neighbours.map(neighbour => {
+        const pathNode = graphState.pathNodesByState.get(neighbour.stateId);
+
+        if (pathNode) {
+            return {
+                source,
+                move: neighbour.move,
+                kind: "path",
+                target: pathNode,
+            };
+        }
+
+        const existingNode = graphState.explorationNodesByState.get(neighbour.stateId);
+        if (existingNode) {
+            applyExactMetadataToNode(existingNode, neighbour, {updatePosition: !existingNode.positionLocked});
+            return {
+                source,
+                move: neighbour.move,
+                kind: "branch",
+                target: existingNode,
+            };
+        }
+
+        const target = createLookupAdjacentNode(source, neighbour);
+        graphState.explorationNodesByState.set(neighbour.stateId, target);
+
         return {
             source,
-            move,
+            move: neighbour.move,
             kind: "branch",
-            target: existingNode,
+            target,
         };
-    }
+    });
 
-    const target = createExactAdjacentNode(
-        source,
-        move,
-        targetStateId,
-        branchIndex,
-        branchCount
-    );
-
-    if (targetStateId) {
-        graphState.explorationNodesByState.set(targetStateId, target);
-    }
-
-    return {
-        source,
-        move,
-        kind: "branch",
-        target,
-    };
+    return applyAdjacentFanLayout(source, edges);
 }
 
-function createExactAdjacentNode(source, move, stateId, branchIndex, branchCount) {
-    const targetDepth = estimatedAdjacentDepth(source, stateId);
-    const angle = adjacentNodeAngle(source, move, stateId, branchIndex, branchCount);
-    const radius = targetDepth * GRAPH.ringSpacing + adjacentRadiusJitter(stateId, move);
+function createLookupAdjacentNode(source, neighbour) {
+    const position = exactLookupNodePosition(neighbour);
 
     return {
-        id: `state-${hashString(stateId || `${source.id}:${move}`)}`,
-        stateId,
-        depth: targetDepth,
-        label: `${move} from ${source.label || source.id}`,
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
+        id: `lookup-${neighbour.index ?? hashString(neighbour.stateId || `${source.id}:${neighbour.move}`)}`,
+        stateId: neighbour.stateId,
+        lookupIndex: neighbour.index,
+        rankInDepth: neighbour.rankInDepth,
+        depthCount: neighbour.depthCount,
+        depth: Number.isFinite(neighbour.depth) ? neighbour.depth : outwardAdjacentDepth(source, graphMaximumDepth()),
+        label: `${neighbour.move} from ${source.label || source.id}`,
+        x: position.x,
+        y: position.y,
         parent: source,
-        entryMove: move,
+        entryMove: neighbour.move,
         generation: (source.generation || 0) + 1,
     };
 }
 
-function estimatedAdjacentDepth(source, stateId) {
-    const maximumDepth = graphMaximumDepth();
 
-    if (!stateId) {
-        return outwardAdjacentDepth(source, maximumDepth);
+function applyAdjacentFanLayout(source, edges) {
+    const branchEdges = edges
+        .filter(edge => edge.kind === "branch")
+        .sort(compareAdjacentEdges);
+
+    const depthGroups = new Map();
+
+    for (const edge of branchEdges) {
+        const depth = Math.max(0, edge.target.depth || 0);
+
+        if (!depthGroups.has(depth)) {
+            depthGroups.set(depth, []);
+        }
+
+        depthGroups.get(depth).push(edge);
     }
 
-    if (isSolvedStateId(stateId)) {
+    for (const group of depthGroups.values()) {
+        layoutAdjacentRingGroup(source, group);
+    }
+
+    return edges;
+}
+
+function compareAdjacentEdges(first, second) {
+    const firstDepth = first.target.depth || 0;
+    const secondDepth = second.target.depth || 0;
+
+    if (firstDepth !== secondDepth) {
+        return firstDepth - secondDepth;
+    }
+
+    return GRAPH_MOVE_NAMES.indexOf(first.move) - GRAPH_MOVE_NAMES.indexOf(second.move);
+}
+
+function layoutAdjacentRingGroup(source, edges) {
+    const count = Math.max(1, edges.length);
+    const centreAngle = adjacentRingCentreAngle(source, edges[0]?.target?.depth || source.depth || 0);
+    const spread = adjacentRingSpread(count);
+
+    edges.forEach((edge, index) => {
+        const angle = count === 1
+            ? centreAngle
+            : centreAngle + (index / (count - 1) - 0.5) * spread;
+
+        const position = positionForDepthAndAngle(edge.target.depth || 0, angle);
+        edge.target.x = position.x;
+        edge.target.y = position.y;
+        edge.target.positionLocked = true;
+        edge.ringIndex = index;
+        edge.ringCount = count;
+    });
+}
+
+function adjacentRingCentreAngle(source, targetDepth) {
+    if ((targetDepth || 0) <= 0) {
+        return GRAPH.pathAngle;
+    }
+
+    if ((source.depth || 0) <= 0) {
+        return GRAPH.pathAngle;
+    }
+
+    return Math.atan2(source.y - stackedLayerY(source.depth || 0), source.x || 0);
+}
+
+function adjacentRingSpread(count) {
+    if (count <= 1) {
         return 0;
     }
 
-    const cachedNeighbours = graphState.exactNeighbourCache.get(source.stateId);
-    const exactNeighbour = cachedNeighbours?.neighbours?.find(neighbour => neighbour.stateId === stateId);
-    if (exactNeighbour && Number.isFinite(exactNeighbour.depth)) {
-        return exactNeighbour.depth;
-    }
-
-    if (source.parent && source.parent.stateId === stateId) {
-        return source.parent.depth;
-    }
-
-    const pathNode = graphState.pathNodesByState.get(stateId);
-
-    if (pathNode && isPlausibleAdjacentDepth(source.depth, pathNode.depth)) {
-        return pathNode.depth;
-    }
-
-    if (isOneMoveFromSolvedState(stateId)) {
-        return Math.min(1, maximumDepth);
-    }
-
-    return outwardAdjacentDepth(source, maximumDepth);
-}
-
-function outwardAdjacentDepth(source, maximumDepth) {
-    return Math.max(
-        1,
-        Math.min(maximumDepth, source.depth + 1)
+    return Math.min(
+        Math.PI * 1.65,
+        Math.PI * 0.35 + count * 0.22
     );
 }
 
-function isPlausibleAdjacentDepth(sourceDepth, targetDepth) {
-    return Math.abs((targetDepth || 0) - (sourceDepth || 0)) <= 1;
-}
+function positionForDepthAndAngle(depth, angle) {
+    const safeDepth = Math.max(0, depth || 0);
 
-function isOneMoveFromSolvedState(stateId) {
-    for (const move of GRAPH_MOVE_NAMES) {
-        if (isSolvedStateId(applyGraphMoveToState(stateId, move))) {
-            return true;
-        }
+    if (safeDepth <= 0) {
+        return {x: 0, y: 0};
     }
 
-    return false;
-}
-
-function adjacentNodeAngle(source, move, stateId, branchIndex, branchCount) {
-    const seed = hashString(stateId || `${source.id}:${move}`);
-
-    if (stateId) {
-        return hashUnit(seed) * Math.PI * 2;
+    if (graphState.layoutMode === GRAPH_LAYOUT.STACKED) {
+        return stackedGraphPosition(safeDepth, angle);
     }
 
-    const sourceAngle = Math.atan2(source.y, source.x || 0);
-    const fanCentre = source.depth === 0
-        ? GRAPH.pathAngle + Math.PI
-        : sourceAngle + Math.PI;
-    const fanSpread = Math.PI * 0.82;
-    const offset = branchCount <= 1
-        ? 0
-        : (branchIndex / (branchCount - 1) - 0.5) * fanSpread;
-
-    return fanCentre + offset;
+    const radius = safeDepth * GRAPH.ringSpacing;
+    return {
+        x: radius * Math.cos(angle),
+        y: radius * Math.sin(angle),
+    };
 }
 
 function adjacentRadiusJitter(stateId, move) {
@@ -943,8 +999,12 @@ function handleGraphClick(event) {
     const hit = hitTestGraphNode(world);
 
     if (!hit) {
+        graphState.moveExplorationActive = false;
+        requestGraphRedraw();
         return;
     }
+
+    graphState.moveExplorationActive = true;
 
     if (hit.type === "path") {
         graphState.progressIndex = hit.index;
@@ -1217,7 +1277,7 @@ function drawActiveNodeCloud(size) {
 }
 
 function nodeDatasetForMode(mode) {
-    const cacheKey = `${mode}:${graphState.data?.type || "none"}:${activeNodeCount()}`;
+    const cacheKey = `${mode}:${graphState.layoutMode}:${graphState.data?.type || "none"}:${activeNodeCount()}`;
 
     if (graphState.nodeDatasets.has(cacheKey)) {
         return graphState.nodeDatasets.get(cacheKey);
@@ -1261,17 +1321,7 @@ function buildNodeDataset(rings, mode) {
 }
 
 function graphNodePosition(depth, index, count, mode) {
-    if (depth === 0) {
-        return {x: 0, y: 0};
-    }
-
-    const angle = (2 * Math.PI * (index + 0.5)) / Math.max(1, count);
-    const radius = depth * GRAPH.ringSpacing;
-
-    return {
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
-    };
+    return graphPositionForDepthRank(depth, index, count);
 }
 
 function graphMaximumDepth() {
@@ -1293,6 +1343,11 @@ function hashUnit(value) {
     hash = Math.imul(hash, 0x846ca68b);
     hash ^= hash >>> 16;
     return (hash >>> 0) / 4294967296;
+}
+
+
+function backgroundCloudAlphaFactor() {
+    return graphState.moveExplorationActive ? GRAPH.explorationFadeAlpha : 1;
 }
 
 function drawNodeCloudWebGl(dataset, size) {
@@ -1317,9 +1372,10 @@ function drawNodeCloudWebGl(dataset, size) {
     gl.uniform2f(locations.offset, graphState.offsetX, graphState.offsetY);
     gl.uniform1f(locations.pointSize, currentPointSize(dataset.mode, size.pixelRatio));
 
+    const alphaFactor = backgroundCloudAlphaFactor();
     const color = dataset.mode === GRAPH_MODE.ALL
-        ? [0.650, 0.790, 1.000, 0.62]
-        : [1.000, 0.690, 0.360, 0.78];
+        ? [0.650, 0.790, 1.000, 0.62 * alphaFactor]
+        : [1.000, 0.690, 0.360, 0.78 * alphaFactor];
 
     gl.uniform4f(locations.color, color[0], color[1], color[2], color[3]);
     gl.drawArrays(gl.POINTS, 0, dataset.count);
@@ -1334,9 +1390,10 @@ function drawNodeCloudCanvas(dataset, size) {
     context.save();
     context.translate(graphState.offsetX, graphState.offsetY);
     context.scale(graphState.scale, graphState.scale);
+    const alphaFactor = backgroundCloudAlphaFactor();
     context.fillStyle = dataset.mode === GRAPH_MODE.ALL
-        ? "rgba(166, 202, 255, 0.56)"
-        : "rgba(255, 176, 92, 0.70)";
+        ? `rgba(166, 202, 255, ${0.56 * alphaFactor})`
+        : `rgba(255, 176, 92, ${0.70 * alphaFactor})`;
 
     for (let index = 0; index < dataset.count; index++) {
         const x = positions[index * 2];
@@ -1369,28 +1426,61 @@ function drawRings(context) {
     const pathDepths = new Set(graphState.pathNodes.map(node => node.depth));
 
     for (const ring of rings) {
-        const radius = ring.depth * GRAPH.ringSpacing;
+        const depth = ring.depth;
+        const isHovered = graphState.hoveredRingDepth === depth;
+        const isPathRing = pathDepths.has(depth);
 
         context.beginPath();
-        context.arc(0, 0, radius, 0, Math.PI * 2);
-        const isHovered = graphState.hoveredRingDepth === ring.depth;
-        const isPathRing = pathDepths.has(ring.depth);
-        context.strokeStyle = ring.depth === 0
+
+        if (graphState.layoutMode === GRAPH_LAYOUT.STACKED && depth > 0) {
+            const radius = Math.max(GRAPH.stackedMinRadius, depth * GRAPH.ringSpacing);
+            context.ellipse(
+                0,
+                stackedLayerY(depth),
+                radius,
+                radius * GRAPH.stackedYScale,
+                0,
+                0,
+                Math.PI * 2
+            );
+        } else {
+            const radius = depth * GRAPH.ringSpacing;
+            context.arc(0, 0, radius, 0, Math.PI * 2);
+        }
+
+        context.strokeStyle = depth === 0
             ? "rgba(134, 239, 172, 0.9)"
             : isHovered
                 ? "rgba(249, 250, 251, 0.65)"
                 : isPathRing
                     ? "rgba(96, 165, 250, 0.42)"
                     : "rgba(148, 163, 184, 0.18)";
-        context.lineWidth = ring.depth === 0 || isHovered ? 3 / graphState.scale : 1 / graphState.scale;
+        context.lineWidth = depth === 0 || isHovered ? 3 / graphState.scale : 1 / graphState.scale;
         context.stroke();
 
-        if (ring.depth > 0 && graphState.scale > 0.35) {
+        if (depth > 0 && graphState.scale > 0.35) {
+            const label = ringLabelPosition(depth);
             context.fillStyle = "rgba(209, 213, 219, 0.8)";
             context.font = `${12 / graphState.scale}px Arial, Helvetica, sans-serif`;
-            context.fillText(`d${ring.depth}`, radius + 8 / graphState.scale, -6 / graphState.scale);
+            context.fillText(`d${depth}`, label.x, label.y);
         }
     }
+}
+
+function ringLabelPosition(depth) {
+    if (graphState.layoutMode === GRAPH_LAYOUT.STACKED) {
+        const radius = Math.max(GRAPH.stackedMinRadius, depth * GRAPH.ringSpacing);
+        return {
+            x: radius + 8 / graphState.scale,
+            y: stackedLayerY(depth) - 6 / graphState.scale,
+        };
+    }
+
+    const radius = depth * GRAPH.ringSpacing;
+    return {
+        x: radius + 8 / graphState.scale,
+        y: -6 / graphState.scale,
+    };
 }
 
 function drawSolvedMarker(context) {
@@ -1414,40 +1504,65 @@ function drawAdjacentMoveEdges(context) {
     context.lineCap = "round";
     context.lineJoin = "round";
 
-    for (const edge of edges) {
-        context.beginPath();
-        context.moveTo(edge.source.x, edge.source.y);
-        context.lineTo(edge.target.x, edge.target.y);
-        context.strokeStyle = edge.kind === "return" || edge.kind === "path"
-            ? "rgba(134, 239, 172, 0.36)"
-            : "rgba(251, 146, 60, 0.48)";
-        context.lineWidth = 1.6 / graphState.scale;
-        context.stroke();
-    }
+    edges.forEach(edge => {
+        drawStraightMoveEdge(context, edge);
+    });
 
-    for (const edge of edges) {
-        const radius = 4.2 / graphState.scale;
+    edges.forEach(edge => {
+        const isPathTarget = edge.kind === "return" || edge.kind === "path";
+        const radius = GRAPH.adjacentNodeSize / graphState.scale;
+        const fill = isPathTarget
+            ? "#86efac"
+            : "#fb923c";
+        const halo = isPathTarget
+            ? "rgba(134, 239, 172, 0.22)"
+            : "rgba(251, 146, 60, 0.28)";
 
-        context.beginPath();
-        context.arc(edge.target.x, edge.target.y, radius, 0, Math.PI * 2);
-        context.fillStyle = edge.kind === "return" || edge.kind === "path"
-            ? "rgba(134, 239, 172, 0.84)"
-            : "rgba(251, 146, 60, 0.90)";
-        context.fill();
-        context.strokeStyle = "rgba(15, 23, 42, 0.9)";
-        context.lineWidth = 1.4 / graphState.scale;
-        context.stroke();
+        drawHaloedCircle(
+            context,
+            edge.target.x,
+            edge.target.y,
+            radius,
+            fill,
+            "rgba(15, 23, 42, 0.95)",
+            halo,
+            radius * 2.25
+        );
 
-        if (graphState.scale > 0.48) {
-            const midX = (edge.source.x + edge.target.x) / 2;
-            const midY = (edge.source.y + edge.target.y) / 2;
-            context.fillStyle = "rgba(253, 186, 116, 0.92)";
-            context.font = `${11 / graphState.scale}px Arial, Helvetica, sans-serif`;
-            context.fillText(edge.move, midX + 5 / graphState.scale, midY - 5 / graphState.scale);
+        if (graphState.scale > 0.34) {
+            const label = edgeLabelPosition(edge);
+            drawGraphLabel(
+                context,
+                edge.move,
+                label.x,
+                label.y,
+                "rgba(255, 237, 213, 0.98)",
+                11
+            );
         }
-    }
+    });
 
     context.restore();
+}
+
+function drawStraightMoveEdge(context, edge) {
+    const isPathTarget = edge.kind === "return" || edge.kind === "path";
+
+    context.beginPath();
+    context.moveTo(edge.source.x, edge.source.y);
+    context.lineTo(edge.target.x, edge.target.y);
+    context.strokeStyle = isPathTarget
+        ? "rgba(134, 239, 172, 0.50)"
+        : "rgba(251, 146, 60, 0.62)";
+    context.lineWidth = (isPathTarget ? 2.1 : 1.9) / graphState.scale;
+    context.stroke();
+}
+
+function edgeLabelPosition(edge) {
+    return {
+        x: (edge.source.x + edge.target.x) / 2 + 4 / graphState.scale,
+        y: (edge.source.y + edge.target.y) / 2 - 4 / graphState.scale,
+    };
 }
 
 function drawPathEdges(context) {
@@ -1468,10 +1583,17 @@ function drawPathEdges(context) {
         context.beginPath();
         context.moveTo(from.x, from.y);
         context.lineTo(to.x, to.y);
+        context.strokeStyle = "rgba(15, 23, 42, 0.78)";
+        context.lineWidth = (completed ? 9 : 7) / graphState.scale;
+        context.stroke();
+
+        context.beginPath();
+        context.moveTo(from.x, from.y);
+        context.lineTo(to.x, to.y);
         context.strokeStyle = completed
-            ? "rgba(134, 239, 172, 0.95)"
-            : "rgba(96, 165, 250, 0.75)";
-        context.lineWidth = (completed ? 6 : 4) / graphState.scale;
+            ? "rgba(134, 239, 172, 0.98)"
+            : "rgba(96, 165, 250, 0.88)";
+        context.lineWidth = (completed ? 5.8 : 4.2) / graphState.scale;
         context.stroke();
     }
 }
@@ -1484,26 +1606,40 @@ function drawPathNodes(context) {
         const isCurrent = !graphState.activeNode && index === graphState.progressIndex;
         const isSolved = index === nodes.length - 1;
         const radius = (isCurrent ? GRAPH.currentNodeSize : GRAPH.pathNodeSize) / graphState.scale;
-
-        context.beginPath();
-        context.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        context.fillStyle = isSolved
+        const fill = isSolved
             ? "#86efac"
             : isCurrent
                 ? "#fef08a"
                 : "#60a5fa";
-        context.fill();
-        context.strokeStyle = "#111827";
-        context.lineWidth = 2 / graphState.scale;
-        context.stroke();
+        const halo = isSolved
+            ? "rgba(134, 239, 172, 0.28)"
+            : isCurrent
+                ? "rgba(254, 240, 138, 0.32)"
+                : "rgba(96, 165, 250, 0.24)";
 
-        if (node.moveToNext && index < nodes.length - 1) {
+        drawHaloedCircle(
+            context,
+            node.x,
+            node.y,
+            radius,
+            fill,
+            "#111827",
+            halo,
+            radius * (isCurrent ? 2.35 : 2.0)
+        );
+
+        if (node.moveToNext && index < nodes.length - 1 && graphState.scale > 0.34) {
             const next = nodes[index + 1];
             const midX = (node.x + next.x) / 2;
             const midY = (node.y + next.y) / 2;
-            context.fillStyle = "rgba(249, 250, 251, 0.9)";
-            context.font = `${13 / graphState.scale}px Arial, Helvetica, sans-serif`;
-            context.fillText(node.moveToNext, midX + 8 / graphState.scale, midY - 8 / graphState.scale);
+            drawGraphLabel(
+                context,
+                node.moveToNext,
+                midX + 8 / graphState.scale,
+                midY - 8 / graphState.scale,
+                "rgba(249, 250, 251, 0.96)",
+                13
+            );
         }
     }
 }
@@ -1518,19 +1654,72 @@ function drawFocusedExplorationNode(context) {
 
     const radius = GRAPH.currentNodeSize / graphState.scale;
 
-    context.beginPath();
-    context.arc(node.x, node.y, radius, 0, Math.PI * 2);
-    context.fillStyle = "#fef08a";
-    context.fill();
-    context.strokeStyle = "#111827";
-    context.lineWidth = 2 / graphState.scale;
-    context.stroke();
+    drawHaloedCircle(
+        context,
+        node.x,
+        node.y,
+        radius,
+        "#fef08a",
+        "#111827",
+        "rgba(254, 240, 138, 0.36)",
+        radius * 2.55
+    );
 
     if (graphState.scale > 0.42) {
-        context.fillStyle = "rgba(254, 240, 138, 0.95)";
-        context.font = `${12 / graphState.scale}px Arial, Helvetica, sans-serif`;
-        context.fillText("current", node.x + 10 / graphState.scale, node.y - 10 / graphState.scale);
+        drawGraphLabel(
+            context,
+            "current",
+            node.x + 10 / graphState.scale,
+            node.y - 10 / graphState.scale,
+            "rgba(254, 240, 138, 0.98)",
+            12
+        );
     }
+}
+
+function drawHaloedCircle(context, x, y, radius, fillStyle, strokeStyle, haloStyle, haloRadius) {
+    context.beginPath();
+    context.arc(x, y, haloRadius, 0, Math.PI * 2);
+    context.fillStyle = haloStyle;
+    context.fill();
+
+    context.beginPath();
+    context.arc(x, y, radius * 1.28, 0, Math.PI * 2);
+    context.fillStyle = "rgba(15, 23, 42, 0.88)";
+    context.fill();
+
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = fillStyle;
+    context.fill();
+    context.strokeStyle = strokeStyle;
+    context.lineWidth = 2 / graphState.scale;
+    context.stroke();
+}
+
+function drawGraphLabel(context, text, x, y, fillStyle, size) {
+    context.save();
+    context.font = `${size / graphState.scale}px Arial, Helvetica, sans-serif`;
+    const paddingX = 4 / graphState.scale;
+    const paddingY = 3 / graphState.scale;
+    const metrics = context.measureText(text);
+    const width = metrics.width + paddingX * 2;
+    const height = (size + 4) / graphState.scale;
+
+    roundedRect(
+        context,
+        x - paddingX,
+        y - height + paddingY,
+        width,
+        height,
+        5 / graphState.scale
+    );
+    context.fillStyle = "rgba(15, 23, 42, 0.72)";
+    context.fill();
+
+    context.fillStyle = fillStyle;
+    context.fillText(text, x, y);
+    context.restore();
 }
 
 function drawGraphLegend(context, size) {
@@ -1551,7 +1740,7 @@ function drawGraphLegend(context, size) {
 
     context.fillStyle = "#f9fafb";
     context.font = "bold 14px Arial, Helvetica, sans-serif";
-    context.fillText(graphModeLabel(graphState.displayMode), 30, 42);
+    context.fillText(`${graphModeLabel(graphState.displayMode)} · ${graphLayoutLabel(graphState.layoutMode)}`, 30, 42);
 
     context.fillStyle = "#d1d5db";
     context.font = "12px Arial, Helvetica, sans-serif";
@@ -1588,6 +1777,7 @@ function previousGraphMove() {
 
     graphState.progressIndex = Math.max(0, graphState.progressIndex - 1);
     graphState.activeNode = null;
+    graphState.moveExplorationActive = false;
     graphState.adjacentEdges = layoutFocusedAdjacentEdges();
     updateGraphStatus();
     requestGraphRedraw();
@@ -1603,6 +1793,7 @@ function nextGraphMove() {
         graphState.progressIndex + 1
     );
     graphState.activeNode = null;
+    graphState.moveExplorationActive = false;
     graphState.adjacentEdges = layoutFocusedAdjacentEdges();
     updateGraphStatus();
     requestGraphRedraw();
@@ -1618,16 +1809,17 @@ function updateGraphStatus() {
     const current = focusedGraphNode();
     const nextMove = current?.moveToNext;
     const viewMode = graphModeLabel(graphState.displayMode);
+    const layoutText = graphLayoutLabel(graphState.layoutMode);
     const pathText = nextMove
         ? `Next move: ${nextMove}.`
         : "Solved.";
 
     if (graphState.displayMode === GRAPH_MODE.SOLUTION) {
-        setGraphStatus(`${viewMode}. ${pathText} Click a node to explore moves.`);
+        setGraphStatus(`${viewMode} · ${layoutText}. ${pathText} Click a node to explore moves.`);
         return;
     }
 
-    setGraphStatus(`${viewMode}. ${formatInteger(activeNodeCount())} nodes shown. ${pathText}`);
+    setGraphStatus(`${viewMode} · ${layoutText}. ${formatInteger(activeNodeCount())} nodes shown. ${pathText}`);
 }
 
 function graphModeLabel(mode) {
@@ -1640,6 +1832,10 @@ function graphModeLabel(mode) {
         default:
             return "Solution path";
     }
+}
+
+function graphLayoutLabel(layout) {
+    return layout === GRAPH_LAYOUT.FLAT ? "Flat" : "Stacked";
 }
 
 function setGraphStatus(message) {
@@ -1664,6 +1860,7 @@ window.stateGraph = {
     next: nextGraphMove,
     previous: previousGraphMove,
     setMode: setGraphDisplayMode,
+    setLayout: setGraphLayoutMode,
 };
 
 window.addEventListener("resize", () => {

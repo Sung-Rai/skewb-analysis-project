@@ -76,6 +76,13 @@
                         <option value="all">All states</option>
                     </select>
                 </label>
+                <label class="graph-mode-control" for="graphLayoutSelect">
+                    Layout
+                    <select id="graphLayoutSelect">
+                        <option value="stacked" selected>Stacked</option>
+                        <option value="flat">Flat</option>
+                    </select>
+                </label>
                 <button id="graphResetBtn" type="button">Reset</button>
                 <button id="graphFitBtn" type="button">Fit</button>
                 <button id="graphPrevBtn" type="button">Back</button>
@@ -89,7 +96,7 @@
         </div>
 
         <p id="graphHelp" class="help">
-            Drag to move. Scroll to zoom. Click a node to explore other moves.
+            Drag to move. Scroll to zoom. Use Stacked to show depth upward.
         </p>
     </section>
 </main>
