@@ -12,53 +12,106 @@
 </head>
 <body>
 <main>
-    <h1>Skewb Solver</h1>
-    <p class="subtitle">
-        Scan or enter your Skewb colours, then solve it.
-    </p>
+    <header class="page-header">
+        <div class="page-title-block">
+            <h1>Skewb Solver</h1>
+            <p class="subtitle">Scan or enter your Skewb colours, then solve it.</p>
 
-    <div class="layout">
-        <section class="card net-wrap">
+            <div class="header-dropdowns">
+                <details class="header-dropdown notation-dropdown">
+                    <summary>Turn notation</summary>
+
+                    <div class="dropdown-panel notation-dropdown-body">
+                        <p class="help notation-intro">
+                            A letter names the corner to turn. A prime mark means turn it the other way.
+                        </p>
+
+                        <div class="notation-grid" aria-label="Turn notation guide">
+                            <div><strong>R</strong><span>Upper right front corner</span></div>
+                            <div><strong>L</strong><span>Upper left back corner</span></div>
+                            <div><strong>D</strong><span>Lower left front corner</span></div>
+                            <div><strong>B</strong><span>Lower right back corner</span></div>
+                            <div><strong>'</strong><span>Counterclockwise</span></div>
+                        </div>
+
+                        <p class="help notation-note">
+                            Clockwise means when looking directly at that corner.
+                        </p>
+
+                        <a class="notation-examples-button" href="/turn-examples.html">
+                            View turn examples
+                        </a>
+                    </div>
+                </details>
+
+                <details class="header-dropdown camera-dropdown">
+                    <summary>Camera scan</summary>
+
+                    <div class="dropdown-panel camera-dropdown-body">
+                        <p id="scanStatus" class="help">Scan the R centre face.</p>
+
+                        <div class="camera-content">
+                            <div class="camera-wrap">
+                                <video id="camera" autoplay playsinline></video>
+                                <canvas id="overlay" width="400" height="400"></canvas>
+                                <canvas id="captureCanvas" width="400" height="400" hidden></canvas>
+                            </div>
+
+                            <div class="camera-actions">
+                                <button id="startCameraBtn" type="button">Start</button>
+                                <button id="stopCameraBtn" type="button">Stop</button>
+                                <button id="captureFaceBtn" type="button">Capture</button>
+                                <button id="resetScanBtn" type="button">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </header>
+
+    <div class="puzzle-entry-grid">
+        <section class="card net-wrap puzzle-card" aria-labelledby="puzzleTitle">
+            <div class="section-heading puzzle-heading">
+                <div>
+                    <h2 id="puzzleTitle">Puzzle</h2>
+                    <p class="help">Click stickers to edit. Drag faces to swap. Use arrows to rotate a face.</p>
+                </div>
+            </div>
             <div id="faces" class="cube-net"></div>
         </section>
 
-        <aside class="card controls-panel">
-            <h2>Pick a colour</h2>
-            <div id="palette" class="palette"></div>
-
-            <section class="card scanner-card" aria-labelledby="cameraScanTitle">
-                <h2 id="cameraScanTitle">Camera scan</h2>
-
-                <p id="scanStatus" class="help">Scan the R centre face.</p>
-
-                <div class="camera-wrap">
-                    <video id="camera" autoplay playsinline></video>
-                    <canvas id="overlay" width="400" height="400"></canvas>
-                    <canvas id="captureCanvas" width="400" height="400" hidden></canvas>
-                </div>
-
-                <div class="camera-actions">
-                    <button id="startCameraBtn" type="button">Start</button>
-                    <button id="stopCameraBtn" type="button">Stop</button>
-                    <button id="captureFaceBtn" type="button">Capture</button>
-                    <button id="resetScanBtn" type="button">Reset</button>
-                </div>
-            </section>
-
-            <div class="actions">
-                <button class="primary" id="solveBtn" type="button">Solve</button>
-                <button id="exampleBtn" type="button">Example</button>
-                <button id="solvedBtn" type="button">Solved</button>
-                <button id="clearBtn" type="button">Clear</button>
+        <section class="card palette-card" aria-labelledby="paletteTitle">
+            <div class="section-heading compact-heading palette-heading">
+                <h2 id="paletteTitle">Colours</h2>
+                <p class="help">Choose a colour, then click stickers.</p>
             </div>
-
-            <div id="output" class="output help">Pick colours or scan the puzzle, then solve.</div>
-
-            <p class="help">
-                Tip: click stickers to edit them. Drag faces to swap them. Use the arrows to rotate a face.
-            </p>
-        </aside>
+            <div id="palette" class="palette vertical-palette"></div>
+        </section>
     </div>
+
+    <section class="card solve-card" aria-labelledby="solveTitle">
+        <div class="section-heading compact-heading">
+            <h2 id="solveTitle">Solve</h2>
+            <p class="help">Load an example, clear the puzzle, or solve the current colours.</p>
+        </div>
+        <div class="actions">
+            <button class="primary" id="solveBtn" type="button">Solve</button>
+            <button id="exampleBtn" type="button">Example</button>
+            <button id="solvedBtn" type="button">Solved</button>
+            <button id="clearBtn" type="button">Clear</button>
+        </div>
+    </section>
+
+    <section class="card output-card" aria-labelledby="resultTitle">
+        <div class="section-heading">
+            <div>
+                <h2 id="resultTitle">Result</h2>
+                <p class="help">The solver also gives simple corner-turn steps.</p>
+            </div>
+        </div>
+        <div id="output" class="output help">Pick colours or scan the puzzle, then solve.</div>
+    </section>
 
     <section class="card graph-card" aria-labelledby="stateGraphTitle">
         <div class="graph-header">
@@ -95,9 +148,7 @@
             <canvas id="stateGraph" width="900" height="560" aria-label="Skewb solve graph"></canvas>
         </div>
 
-        <p id="graphHelp" class="help">
-            Drag to move. Scroll to zoom. Use Stacked to show depth upward.
-        </p>
+        <p id="graphHelp" class="help">Drag to move. Scroll to zoom. Click a path node to explore moves.</p>
     </section>
 </main>
 </body>
